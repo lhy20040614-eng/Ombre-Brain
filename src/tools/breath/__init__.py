@@ -43,6 +43,7 @@ async def dispatch(
     max_results: Optional[int] = 0,
     importance_min: Optional[int] = -1,
     tags: Optional[str] = "",
+    mode: Optional[str] = "summary",
 ) -> str:
     # --- Null-safe coercion ---
     if query is None: query = ""
@@ -53,13 +54,19 @@ async def dispatch(
     if max_results is None: max_results = 0
     if importance_min is None: importance_min = -1
     if tags is None: tags = ""
+    if mode is None: mode = "summary"
 
     if rt.mark_op:
         rt.mark_op("breath")
     await rt.decay_engine.ensure_started()
 
+    # B1: query 非空时忽略 mode，始终返回 full
+    if query and query.strip():
+        mode = "full"
+
     surfacing_cfg = rt.config.get("surfacing", {}) or {}
-    default_results = int(surfacing_cfg.get("breath_max_results") or 20)
+    # B4: 默认 max_results 改为 5（原 20）
+    default_results = int(surfacing_cfg.get("breath_max_results") or 5)
     default_tokens = int(surfacing_cfg.get("breath_max_tokens") or 10000)
     if max_results <= 0:
         max_results = default_results
@@ -76,7 +83,7 @@ async def dispatch(
 
     # --- Feel 通道优先：即使无 query 也直接拉 feel ---
     if domain.strip().lower() == "feel":
-        return await surface_feels(max_tokens=max_tokens)
+        return await surface_feels(max_tokens=max_tokens, mode=mode)
 
     # --- importance_min 模式：跳过语义，按 importance 降序 ---
     if importance_min >= 1:
@@ -84,6 +91,7 @@ async def dispatch(
             importance_min=importance_min,
             max_tokens=max_tokens,
             tag_filter=tag_filter,
+            mode=mode,
         )
 
     # --- 无 query：浮现模式 ---
@@ -92,9 +100,10 @@ async def dispatch(
             max_results=max_results,
             max_tokens=max_tokens,
             tag_filter=tag_filter,
+            mode=mode,
         )
 
-    # --- 有 query：检索模式 ---
+    # --- 有 query：检索模式（mode 已被强制为 full）---
     return await surface_search(
         query=query,
         max_results=max_results,

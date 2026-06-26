@@ -21,6 +21,7 @@ tools/breath/importance.py — importance_min 模式
 """
 
 from .. import _runtime as rt
+from .._common import format_bucket_summary
 from utils import strip_wikilinks, count_tokens_approx
 
 
@@ -31,7 +32,7 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
     return all(t in bucket_tags for t in tag_filter)
 
 
-async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter: list) -> str:
+async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter: list, mode: str = "summary") -> str:
     try:
         all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
     except Exception as e:
@@ -47,6 +48,9 @@ async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter
     filtered = filtered[:20]
     if not filtered:
         return f"没有重要度 >= {importance_min} 的记忆。"
+    if mode == "summary":
+        lines = [f"[importance:{b['metadata'].get('importance', 0)}] {format_bucket_summary(b)}" for b in filtered]
+        return "\n".join(lines)
     results = []
     token_used = 0
     for b in filtered:
@@ -60,7 +64,6 @@ async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter
                 rt.logger.warning(f"importance_min dehydrate failed / 脱水失败: {dehy_err}")
                 is_pinned = b["metadata"].get("pinned") or b["metadata"].get("protected")
                 if is_pinned:
-                    # pinned 桶脱水失败时降级展示原文，确保核心准则可见
                     summary = strip_wikilinks(b["content"])[:300].strip() or "（空记忆）"
                 else:
                     continue

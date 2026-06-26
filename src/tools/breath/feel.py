@@ -21,16 +21,20 @@ tools/breath/feel.py — feel 通道
 """
 
 from .. import _runtime as rt
+from .._common import format_bucket_summary
 from utils import strip_wikilinks, count_tokens_approx
 
 
-async def surface_feels(max_tokens: int) -> str:
+async def surface_feels(max_tokens: int, mode: str = "summary") -> str:
     try:
         all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
         feels = [b for b in all_buckets if b.get("metadata", {}).get("type") == "feel"]
         feels.sort(key=lambda b: b.get("metadata", {}).get("created", ""), reverse=True)
         if not feels:
             return "没有留下过 feel。"
+        if mode == "summary":
+            lines = [format_bucket_summary(f) for f in feels]
+            return "=== 你留下的 feel（新→旧）===\n" + "\n".join(lines)
         full_lines: list[str] = []
         collapsed_lines: list[str] = []
         used = 0

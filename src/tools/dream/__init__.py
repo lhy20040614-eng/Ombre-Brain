@@ -23,7 +23,7 @@ from .hints import build_connection_hint, build_crystal_hint
 from .output import format_dream_output
 
 
-async def dispatch(window_hours: Optional[int] = 48) -> str:
+async def dispatch(window_hours: Optional[int] = 48, detail_ids: Optional[str] = "") -> str:
     await rt.decay_engine.ensure_started()
 
     try:
@@ -33,6 +33,11 @@ async def dispatch(window_hours: Optional[int] = 48) -> str:
         return "记忆系统暂时无法访问。"
 
     window_hours = max(1, min(int(window_hours or 48), 24 * 14))
+    # B3: 解析 detail_ids
+    detail_id_set = set()
+    if detail_ids:
+        detail_id_set = {d.strip() for d in detail_ids.split(",") if d.strip()}
+
     recent = collect_candidates(all_buckets, window_hours)
     if not recent:
         return f"过去 {window_hours} 小时内没有需要消化的新记忆。"
@@ -40,12 +45,14 @@ async def dispatch(window_hours: Optional[int] = 48) -> str:
     connection_hint = await build_connection_hint(recent)
     crystal_hint = await build_crystal_hint(all_buckets)
 
+    # B3: 默认只返回最近 5 个桶的摘要，detail_ids 指定的桶返回全文
     final_text = format_dream_output(
         recent=recent,
         all_buckets=all_buckets,
         window_hours=window_hours,
         connection_hint=connection_hint,
         crystal_hint=crystal_hint,
+        detail_ids=detail_id_set,
     )
 
     if rt.fire_webhook:

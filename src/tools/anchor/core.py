@@ -53,9 +53,11 @@ async def anchor_release(bucket_id: str) -> str:
     return f"我把它从 anchor 移开了。它会重新参与默认浮现。当前 {result['count']}/{result['limit']}。"
 
 
-async def pulse(include_archive: Optional[bool] = False) -> str:
+async def pulse(include_archive: Optional[bool] = False, show_all: Optional[bool] = False) -> str:
     if include_archive is None:
         include_archive = False
+    if show_all is None:
+        show_all = False
     await rt.decay_engine.ensure_started()
     try:
         stats = await rt.bucket_mgr.get_stats()
@@ -155,6 +157,16 @@ async def pulse(include_archive: Optional[bool] = False) -> str:
             letter_lines.append(line + f" [{author}]")
         else:
             normal_lines.append(line)
+
+    # B2: 默认只显示钉选桶 + 非钉选按权重前 15 个
+    if not show_all and normal_lines:
+        pinned_lines = [l for l in normal_lines if l.startswith("📌")]
+        non_pinned_lines = [l for l in normal_lines if not l.startswith("📌")]
+        hidden_count = max(0, len(non_pinned_lines) - 15)
+        display_lines = pinned_lines + non_pinned_lines[:15]
+        normal_lines = display_lines
+        if hidden_count > 0:
+            normal_lines.append(f"（还有 {hidden_count} 个桶未显示，传 show_all=true 查看全部）")
 
     sections = [status]
     if normal_lines:

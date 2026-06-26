@@ -28,6 +28,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from .. import _runtime as rt
+from .._common import format_bucket_summary
 from utils import strip_wikilinks, count_tokens_approx
 
 # U-07 fix: throttle the sampling-fallback INFO log to once per 5 minutes.
@@ -44,7 +45,7 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
     return all(t in bucket_tags for t in tag_filter)
 
 
-async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -> str:
+async def surface_default(max_results: int, max_tokens: int, tag_filter: list, mode: str = "summary") -> str:
     try:
         all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
     except Exception as e:
@@ -64,15 +65,17 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     pinned_ids = {b["id"] for b in pinned_buckets}
     pinned_results = []
     for b in pinned_buckets:
-        try:
-            clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
-            summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
-            pinned_results.append(f"📌 [核心准则] [bucket_id:{b['id']}] {summary}")
-        except Exception as e:
-            rt.logger.warning(f"Failed to dehydrate pinned bucket / 钉选桶脱水失败: {e}")
-            # 降级：直接展示原文片段，确保核心准则永远可见
-            fallback = strip_wikilinks(b["content"])[:300].strip() or "（空记忆）"
-            pinned_results.append(f"📌 [核心准则] [bucket_id:{b['id']}] {fallback}")
+        if mode == "summary":
+            pinned_results.append(f"📌 {format_bucket_summary(b)}")
+        else:
+            try:
+                clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
+                summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
+                pinned_results.append(f"📌 [核心准则] [bucket_id:{b['id']}] {summary}")
+            except Exception as e:
+                rt.logger.warning(f"Failed to dehydrate pinned bucket / 钉选桶脱水失败: {e}")
+                fallback = strip_wikilinks(b["content"])[:300].strip() or "（空记忆）"
+                pinned_results.append(f"📌 [核心准则] [bucket_id:{b['id']}] {fallback}")
 
     # --- iter 2.0: anchor 桶在默认浮现模式的 *未解决池* 不出现（anchor 是坐标系不是浮现对象）---
     # anchor 过滤仅作用于 unresolved 候选，不影响 pinned 提取（上方已完成）。
@@ -186,22 +189,30 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
         candidates = cold_start + non_cold
     candidates = candidates[:max_results]
 
+    # B4: 记录总候选数，用于末尾附注
+    total_candidates = len(candidates)
     dynamic_results = []
     for b in candidates:
         if token_budget <= 0:
             break
-        try:
-            clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
-            summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
-            summary_tokens = count_tokens_approx(summary)
-            if summary_tokens > token_budget:
-                break
+        if mode == "summary":
             score = rt.decay_engine.calculate_score(b["metadata"])
-            dynamic_results.append(f"[权重:{score:.2f}] [bucket_id:{b['id']}] {summary}")
-            token_budget -= summary_tokens
-        except Exception as e:
-            rt.logger.warning(f"Failed to dehydrate surfaced bucket / 浮现脱水失败: {e}")
-            continue
+            line = f"[权重:{score:.2f}] {format_bucket_summary(b)}"
+            dynamic_results.append(line)
+            token_budget -= count_tokens_approx(line)
+        else:
+            try:
+                clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
+                summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
+                summary_tokens = count_tokens_approx(summary)
+                if summary_tokens > token_budget:
+                    break
+                score = rt.decay_engine.calculate_score(b["metadata"])
+                dynamic_results.append(f"[权重:{score:.2f}] [bucket_id:{b['id']}] {summary}")
+                token_budget -= summary_tokens
+            except Exception as e:
+                rt.logger.warning(f"Failed to dehydrate surfaced bucket / 浮现脱水失败: {e}")
+                continue
 
     if not pinned_results and not dynamic_results:
         if rt.mark_op:
@@ -248,12 +259,15 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
         if passive_pool:
             random.shuffle(passive_pool)
             for b in passive_pool[:2]:
-                try:
-                    clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
-                    summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
-                    passive_results.append(f"💤 [久未浮现] [bucket_id:{b['id']}] {summary}")
-                except Exception as e:
-                    rt.logger.warning(f"passive association dehydrate failed: {e}")
+                if mode == "summary":
+                    passive_results.append(f"💤 {format_bucket_summary(b)}")
+                else:
+                    try:
+                        clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
+                        summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
+                        passive_results.append(f"💤 [久未浮现] [bucket_id:{b['id']}] {summary}")
+                    except Exception as e:
+                        rt.logger.warning(f"passive association dehydrate failed: {e}")
     except Exception as e:
         rt.logger.warning(f"passive association block failed: {e}")
 
@@ -274,13 +288,17 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             if resolved_pool:
                 random.shuffle(resolved_pool)
                 for b in resolved_pool[:3]:
-                    try:
-                        clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
-                        summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
-                        dream_results.append(f"✨ [偶遇] [bucket_id:{b['id']}] {summary}")
+                    if mode == "summary":
+                        dream_results.append(f"✨ {format_bucket_summary(b)}")
                         rt.logger.info(f"Dream surface triggered / 偶遇机制触发: {b['id']}")
-                    except Exception as e:
-                        rt.logger.warning(f"Dream surface dehydrate failed / 偶遇脱水失败: {e}")
+                    else:
+                        try:
+                            clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
+                            summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
+                            dream_results.append(f"✨ [偶遇] [bucket_id:{b['id']}] {summary}")
+                            rt.logger.info(f"Dream surface triggered / 偶遇机制触发: {b['id']}")
+                        except Exception as e:
+                            rt.logger.warning(f"Dream surface dehydrate failed / 偶遇脱水失败: {e}")
         except Exception as e:
             rt.logger.warning(f"Dream surface block failed / 偶遇模块异常: {e}")
 
@@ -293,4 +311,8 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
         parts.append("=== 久未浮现 ===\n" + "\n---\n".join(passive_results))
     if dream_results:
         parts.append("=== 偶然想起 ===\n" + "\n---\n".join(dream_results))
+    # B4: 超出 max_results 时附注（钉选桶不计入）
+    hidden = total_candidates - len(dynamic_results)
+    if hidden > 0:
+        parts.append(f"还有 {hidden} 个相关桶未显示，可传 max_results 增大范围。")
     return "\n\n".join(parts)

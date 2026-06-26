@@ -631,3 +631,18 @@ async def cascade_plan_resolved_to_buckets(plan_meta: dict, plan_id: str) -> lis
 # 向后兼容：保留下划线别名（部分历史调用点用 _ 前缀）
 _check_duplicate_for = check_duplicate_for
 _check_plan_resolution = check_plan_resolution
+
+
+def format_bucket_summary(b: dict) -> str:
+    """一行摘要格式：bucket_id + 桶名 + 主题 + 情感坐标 + 重要度 + 更新时间。
+    用于 breath summary 模式、pulse 精简输出等场景，省 token。"""
+    meta = b.get("metadata", {})
+    bid = b.get("id", "?")
+    name = meta.get("name") or ""
+    domains = ",".join(meta.get("domain") or []) or "未分类"
+    val = float(meta.get("valence") or 0.5)
+    aro = float(meta.get("arousal") or 0.3)
+    imp = meta.get("importance", "?")
+    last = (meta.get("last_active") or meta.get("created") or "")[:10]
+    name_part = f" {name}" if name else ""
+    return f"[{bid}]{name_part} 主题:{domains} V{val:.1f}/A{aro:.1f} 重要:{imp} 更新:{last}"

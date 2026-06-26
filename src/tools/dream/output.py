@@ -24,6 +24,7 @@ tools/dream/output.py — dream 最终输出格式化
 """
 
 from .. import _runtime as rt
+from .._common import format_bucket_summary
 from utils import strip_wikilinks, count_tokens_approx
 
 
@@ -33,23 +34,36 @@ def format_dream_output(
     window_hours: int,
     connection_hint: str,
     crystal_hint: str,
+    detail_ids: set = None,
 ) -> str:
+    if detail_ids is None:
+        detail_ids = set()
+    # B3: 默认只显示最近 5 个桶的摘要；detail_ids 指定的桶返回全文
+    max_summary = 5
     parts = []
-    for b in recent:
+    shown_full = 0
+    for i, b in enumerate(recent):
         meta = b["metadata"]
-        resolved_tag = " [已解决]" if meta.get("resolved", False) else " [未解决]"
-        domains = ",".join(meta.get("domain", []))
-        val = float(meta.get("valence") or 0.5)
-        aro = float(meta.get("arousal") or 0.3)
-        created = meta.get("created", "")
-        last_active = meta.get("last_active", "")
-        parts.append(
-            f"[{meta.get('name', b['id'])}]{resolved_tag} "
-            f"主题:{domains} V{val:.1f}/A{aro:.1f} "
-            f"创建:{created} 最近活跃:{last_active}\n"
-            f"ID: {b['id']}\n"
-            f"{strip_wikilinks(b['content'])}"
-        )
+        show_full = b["id"] in detail_ids or (not detail_ids and i < max_summary)
+        if show_full:
+            resolved_tag = " [已解决]" if meta.get("resolved", False) else " [未解决]"
+            domains = ",".join(meta.get("domain", []))
+            val = float(meta.get("valence") or 0.5)
+            aro = float(meta.get("arousal") or 0.3)
+            created = meta.get("created", "")
+            last_active = meta.get("last_active", "")
+            parts.append(
+                f"[{meta.get('name', b['id'])}]{resolved_tag} "
+                f"主题:{domains} V{val:.1f}/A{aro:.1f} "
+                f"创建:{created} 最近活跃:{last_active}\n"
+                f"ID: {b['id']}\n"
+                f"{strip_wikilinks(b['content'])}"
+            )
+            shown_full += 1
+        else:
+            parts.append(format_bucket_summary(b))
+    if len(recent) > shown_full:
+        parts.append(f"（{len(recent) - shown_full} 个桶仅显示摘要，传 detail_ids 指定桶ID查看全文）")
 
     header = (
         f"=== Dreaming · 过去 {window_hours} 小时全量记忆（{len(recent)} 个桶）===\n"

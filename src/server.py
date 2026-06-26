@@ -559,19 +559,20 @@ async def breath(
     max_results: Optional[int] = 0,
     importance_min: Optional[int] = -1,
     tags: Optional[str] = "",
+    mode: Optional[str] = "summary",
 ) -> str:
-    """我睁眼看看自己记得什么。不传query=让权重最高的未解决记忆自己浮上来;传query=按关键词检索我记忆里相关的事。max_tokens=单次返回总token上限(默认 config.surfacing.breath_max_tokens,fallback 10000)。domain逗号分隔,valence/arousal 0~1(-1忽略)。max_results=返回条数上限(默认 config.surfacing.breath_max_results,fallback 20,最大50)。importance_min>=1=跳过语义,按重要度降序拉最多20条我标过的核心事项。tags逗号分隔,AND过滤;tags=\"feel\"或\"__feel__\"等价于domain=\"feel\"读我留下的所有feel。"""
+    """我睁眼看看自己记得什么。不传query=让权重最高的未解决记忆自己浮上来;传query=按关键词检索我记忆里相关的事。max_tokens=单次返回总token上限(默认 config.surfacing.breath_max_tokens,fallback 10000)。domain逗号分隔,valence/arousal 0~1(-1忽略)。max_results=返回条数上限(默认 config.surfacing.breath_max_results,fallback 5,最大50)。钉选桶不计入max_results名额。importance_min>=1=跳过语义,按重要度降序拉最多20条我标过的核心事项。tags逗号分隔,AND过滤;tags=\"feel\"或\"__feel__\"等价于domain=\"feel\"读我留下的所有feel。mode=summary(默认)每桶只返回一行摘要省token;mode=full返回完整内容。query非空时忽略mode始终full。"""
     return await _with_notice(
         _t_breath.dispatch(
             query=query, max_tokens=max_tokens, domain=domain,
             valence=valence, arousal=arousal, max_results=max_results,
-            importance_min=importance_min, tags=tags,
+            importance_min=importance_min, tags=tags, mode=mode,
         ),
         op="breath",
         args={
             "query": query, "max_tokens": max_tokens, "domain": domain,
             "valence": valence, "arousal": arousal, "max_results": max_results,
-            "importance_min": importance_min, "tags": tags,
+            "importance_min": importance_min, "tags": tags, "mode": mode,
         },
     )
 
@@ -676,12 +677,12 @@ async def release(bucket_id: str) -> str:
 
 
 @mcp_extra.tool()
-async def pulse(include_archive: Optional[bool] = False) -> str:
-    """我看一眼自己的记忆系统：固化/动态/衰减/归档桶数量、总占用、衰减引擎是否在跑,以及所有桶的摘要列表。include_archive=True 顺便看归档区。"""
+async def pulse(include_archive: Optional[bool] = False, show_all: Optional[bool] = False) -> str:
+    """我看一眼自己的记忆系统：固化/动态/衰减/归档桶数量、总占用、衰减引擎是否在跑,以及所有桶的摘要列表。include_archive=True 顺便看归档区。默认只显示钉选桶+非钉选按权重前15个,show_all=True 显示全部。"""
     return await _with_notice(
-        _t_anchor.pulse(include_archive=include_archive),
+        _t_anchor.pulse(include_archive=include_archive, show_all=show_all),
         op="pulse",
-        args={"include_archive": include_archive},
+        args={"include_archive": include_archive, "show_all": show_all},
     )
 
 
@@ -768,15 +769,15 @@ async def I(
 
 
 @mcp.tool()
-async def dream(window_hours: Optional[int] = 48) -> str:
+async def dream(window_hours: Optional[int] = 48, detail_ids: Optional[str] = "") -> str:
     """我做一次梦——读取最近 window_hours（默认 48h）内有变动的所有记忆桶,我自己沉进去想一遍。
-    每个桶返回它在窗口内的最新内容（按 last_active 取）,完整正文不截断。
+    默认返回最近5个桶的全文,其余只返回一行摘要省token。detail_ids=逗号分隔的bucket_id,指定的桶返回全文其余摘要。
     想完之后我可以：能放下的 → trace(resolved=1) 让它沉底；有沉淀的 → hold(feel=True, source_bucket=...) 写下我带走的东西；没沉淀的就什么都不做,不强求。
     候选桶超过 40 时按 decay_engine.calculate_score() 排序取前 40，避免一次涌进来太多。"""
     return await _with_notice(
-        _t_dream.dispatch(window_hours=window_hours),
+        _t_dream.dispatch(window_hours=window_hours, detail_ids=detail_ids),
         op="dream",
-        args={"window_hours": window_hours},
+        args={"window_hours": window_hours, "detail_ids": detail_ids},
     )
 
 
